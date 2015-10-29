@@ -3,10 +3,10 @@
 __author__ = 'yw'
 
 import pickle
-import os
 import requests
 import sys
 
+from pymongo import MongoClient
 from pyquery import PyQuery
 from urlparse import urlparse, parse_qs
 
@@ -16,28 +16,22 @@ del sys.setdefaultencoding
 
 HEADER_INFO = {
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) '
-                  'Chrome/46.0.2490.71 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    'Accept-Encoding': 'gzip, deflate',
-    'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.6,en;q=0.4'
+                  'Chrome/46.0.2490.71 Safari/537.36'
 }
 
-
-def check_dir(dirpath):
-    if not os.path.exists(dirpath):
-        os.makedirs(dirpath)
+client = MongoClient('127.0.0.1')
+db = client.Microblog
+members = db.members
 
 
 class MicroBlog(object):
-    def __init__(self, account):
+    def __init__(self, username):
         super(MicroBlog, self).__init__()
         self.sess = requests.Session()
-        self.account = account
-        self.parm_st = account.get('st', None)
-        self.gid = account.get('gid', None)
-        self.uid = account.get('uid', None)
-        check_dir('cookies')
-        check_dir('param_st')
+        self.account = members.find_one(dict(username=username))
+        self.parm_st = self.account.get('st', None)
+        self.gid = self.account.get('gid', None)
+        self.uid = self.account.get('uid', None)
         self.init_session()
 
     def login(self):
@@ -82,6 +76,18 @@ class MicroBlog(object):
             self.gid = temp_dict['gid'][0]
             self.uid = temp_dict['uid'][0]
             self.parm_st = temp_dict['st'][0]
+            members.update_one(
+                {
+                    'username': self.account['username']
+                },
+                {
+                    '$set':
+                        {
+                            'uid': self.uid,
+                            'st': self.parm_st
+                        }
+                }
+            )
 
     def login_again(self, captcha_page):
         form = captcha_page('form')
@@ -89,10 +95,10 @@ class MicroBlog(object):
         captcha_img_url = form('img:first').attr.src
         with open('captcha.gif', 'wb') as f:
             f.write(self.sess.get(captcha_img_url, headers=HEADER_INFO).content)
-
-        # to do:
-        # need to recognize automatically here
-
+        """
+        to do:
+        need to recognize captcha automatically here
+        """
         captcha_recognized = raw_input('NOW input captcha plz:')
         vk_value = None
         pwd_name = None
@@ -122,14 +128,23 @@ class MicroBlog(object):
         return result
 
     def init_session(self):
-        try:
-            with open('cookies/{}'.format(self.account['username']), 'rb') as f:
-                self.sess.cookies = pickle.load(f)
-                # self.sess.get('http://weibo.cn/', cookies=cookies)
-        except IOError:
+        cookie = self.account.get['cookie']
+        if cookie:
+            self.sess.cookies = pickle.loads(cookie)
+        else:
             self.login()
-            with open('cookies/{}'.format(self.account['username']), 'wb') as f:
-                pickle.dump(self.sess.cookies, f)
+            cookie = pickle.dumps(self.sess.cookies)
+            members.update_one(
+                {
+                    'username': self.account['username']
+                },
+                {
+                    '$set':
+                        {
+                            'cookie': cookie
+                        }
+                }
+            )
 
     def follow(self, target_user, prefix=None):
         if prefix is not None and self.parm_st is not None:
@@ -264,13 +279,22 @@ class MicroBlog(object):
             f.write(self.sess.get(url, headers=HEADER_INFO).content)
 
 
+def stupid_demo():
+    target_client = 'HuaSuiYue'
+    post_digest = 'All Pick...'
+    """
+    Follow him, repost one article of his, comment it, and thumb it up finally
+    """
+    post_relative = None
+    for i in ['Tom', 'Jerry', 'etc']:
+        m = MicroBlog(i)
+        m.follow(target_client)
+        if not post_relative:
+            post_relative = m.locate_post(target_client, post_digest)
+        m.repost(post_relative, 'repost because I like it')
+        m.comment(post_relative, 'yes, this is a garbage comment')
+        m.like(post_relative)
+
+
 if __name__ == '__main__':
-    name = raw_input('username:')
-    pwd = raw_input('password:')
-    t_account = dict(username=name, password=pwd)
-    m = MicroBlog(t_account)
-    m.init_session()
-    m.visit_test('http://weibo.cn/?vt=4')
-    follow_target = raw_input('target person name:')
-    follow_url = m.follow(follow_target)
-    common_url = follow_url.rsplit('&st=')
+    stupid_demo()
