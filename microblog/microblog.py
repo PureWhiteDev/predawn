@@ -5,7 +5,6 @@ __author__ = 'yw'
 import pickle
 import requests
 import sys
-
 from pymongo import MongoClient
 from pyquery import PyQuery
 from urlparse import urlparse, parse_qs
